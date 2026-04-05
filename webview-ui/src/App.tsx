@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   UploadCloud, 
   CheckCircle, Loader2, Plus, Terminal
@@ -6,7 +6,7 @@ import {
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 
-// VS Code API Bridge
+// VS Code API Bridge (acquireVsCodeApi may only be called once)
 const vscode = typeof acquireVsCodeApi !== 'undefined' ? acquireVsCodeApi() : null;
 
 interface SiteDetails {
@@ -25,6 +25,16 @@ interface LogEntry {
   time: string;
 }
 
+interface ApiResponse {
+  type: 'apiResponse';
+  id: string;
+  result: 'success' | 'error';
+  data: unknown;
+}
+
+// Pending request callbacks keyed by request id
+const pendingRequests = new Map<string, (response: ApiResponse) => void>();
+
 const App = () => {
   const [apiKey, setApiKey] = useState('');
   const [step, setStep] = useState('config');
@@ -39,30 +49,50 @@ const App = () => {
     ftpPass: ''
   });
 
+  // Listen for messages posted back from the extension host
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      const message = event.data as ApiResponse;
+      if (message.type === 'apiResponse') {
+        const resolve = pendingRequests.get(message.id);
+        // Explicit typeof guard: resolve is always set by our own dreamHostRequest
+        // code so this is safe, but the guard satisfies static analysis.
+        if (typeof resolve === 'function') {
+          pendingRequests.delete(message.id);
+          resolve(message);
+        }
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, []);
+
   const addLog = (msg: string, type = 'info') => {
     const log: LogEntry = { id: Date.now(), msg, type, time: new Date().toLocaleTimeString() };
     setLogs(prev => [...prev, log]);
-    if (vscode) vscode.postMessage({ type: 'log', value: msg });
+    if (vscode) { vscode.postMessage({ type: 'log', value: msg }); }
   };
 
-  const dreamHostRequest = async (cmd: string, params: Record<string, string> = {}) => {
-    const urlParams = new URLSearchParams({
-      key: apiKey,
-      cmd: cmd,
-      format: 'json',
-      ...params
+  /**
+   * Send a DreamHost API request through the VS Code extension host,
+   * which delegates to the python-dreamhostapi bridge script.
+   */
+  const dreamHostRequest = (cmd: string, params: Record<string, string> = {}): Promise<ApiResponse> => {
+    return new Promise((resolve, reject) => {
+      if (!vscode) {
+        reject(new Error('Not running inside VS Code — cannot call DreamHost API'));
+        return;
+      }
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      pendingRequests.set(id, (response) => {
+        if (response.result === 'error') {
+          reject(new Error(String(response.data)));
+        } else {
+          resolve(response);
+        }
+      });
+      vscode.postMessage({ type: 'apiRequest', id, apiKey, cmd, params });
     });
-    
-    try {
-      const response = await fetch(`https://api.dreamhost.com/?${urlParams.toString()}`);
-      const data = await response.json() as { result: string; data: string };
-      if (data.result === 'error') throw new Error(data.data);
-      return data;
-    } catch (err) {
-      const error = err as Error;
-      addLog(`Error: ${error.message}`, 'error');
-      throw err;
-    }
   };
 
   const startInfrastructure = async () => {
@@ -73,15 +103,15 @@ const App = () => {
       addLog("Domain Hosting Provisioned", "success");
       
       await dreamHostRequest('mysql-add_db', { 
-        db: siteDetails.dbName || 'db_' + Math.floor(Math.random()*1000), 
+        db: siteDetails.dbName || 'db_' + Math.floor(Math.random() * 1000), 
         type: 'mysql', 
         host: `mysql.${siteDetails.domain}` 
       });
       addLog("Database Created", "success");
 
       setStep('deploy');
-    } catch {
-      addLog("Provisioning Failed", "error");
+    } catch (err) {
+      addLog(`Provisioning Failed: ${(err as Error).message}`, "error");
     } finally {
       setLoading(false);
     }
@@ -91,18 +121,18 @@ const App = () => {
     setLoading(true);
     addLog("Sending files to VS Code Extension host...");
     if (vscode) {
-        vscode.postMessage({
-            type: 'deploy',
-            value: siteDetails.domain
-        });
+      vscode.postMessage({ type: 'deploy', value: siteDetails.domain });
     }
     
+    // Placeholder: actual completion is signalled by the extension host via a
+    // future 'deployComplete' message. The timeouts simulate progress until
+    // real SFTP integration is wired up on the extension side.
     setTimeout(() => {
-        addLog("VS Code SFTP Transfer started...", "info");
-        setTimeout(() => {
-            addLog("Deploy Complete!", "success");
-            setLoading(false);
-        }, 2000);
+      addLog("VS Code SFTP Transfer started...", "info");
+      setTimeout(() => {
+        addLog("Deploy Complete!", "success");
+        setLoading(false);
+      }, 2000);
     }, 1000);
   };
 
@@ -176,16 +206,16 @@ const App = () => {
 
         {/* Minimal Terminal */}
         <div className="mt-4 bg-black/40 rounded border border-white/5 flex flex-col h-40">
-           <div className="p-2 border-b border-white/5 flex items-center gap-2 text-[10px] opacity-40 font-bold uppercase">
-             <Terminal size={10} /> Output
-           </div>
-           <div className="flex-1 overflow-y-auto p-2 font-mono text-[10px] space-y-1">
-              {logs.map(log => (
-                <div key={log.id} className={log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : 'text-blue-300'}>
-                  {log.msg}
-                </div>
-              ))}
-           </div>
+          <div className="p-2 border-b border-white/5 flex items-center gap-2 text-[10px] opacity-40 font-bold uppercase">
+            <Terminal size={10} /> Output
+          </div>
+          <div className="flex-1 overflow-y-auto p-2 font-mono text-[10px] space-y-1">
+            {logs.map(log => (
+              <div key={log.id} className={log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : 'text-blue-300'}>
+                {log.msg}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -193,3 +223,4 @@ const App = () => {
 };
 
 export default App;
+

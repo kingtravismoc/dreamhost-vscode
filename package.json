@@ -34,7 +34,8 @@
     "compile": "tsc -p ./",
     "build": "npm run compile && npm run build:webview",
     "build:webview": "cd webview-ui && npm run build",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "setup:python": "pip3 install -r scripts/requirements.txt"
   },
   "devDependencies": {
     "@types/vscode": "^1.85.0",

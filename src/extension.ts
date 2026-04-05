@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { spawn } from 'child_process';
+import * as path from 'path';
 
 export function activate(context: vscode.ExtensionContext) {
     const provider = new DreamDeployWebviewProvider(context.extensionUri);
@@ -9,6 +11,14 @@ export function activate(context: vscode.ExtensionContext) {
             provider
         )
     );
+}
+
+interface ApiRequestMessage {
+    type: 'apiRequest';
+    id: string;
+    apiKey: string;
+    cmd: string;
+    params?: Record<string, string>;
 }
 
 class DreamDeployWebviewProvider implements vscode.WebviewViewProvider {
@@ -33,6 +43,9 @@ class DreamDeployWebviewProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.onDidReceiveMessage(data => {
             switch (data.type) {
+                case 'apiRequest':
+                    this._handleApiRequest(webviewView.webview, data);
+                    break;
                 case 'deploy':
                     vscode.window.showInformationMessage(`Deploying to ${data.value}...`);
                     break;
@@ -40,6 +53,61 @@ class DreamDeployWebviewProvider implements vscode.WebviewViewProvider {
                     console.log(`[Webview Log]: ${data.value}`);
                     break;
             }
+        });
+    }
+
+    /**
+     * Invokes the Python dreamhostapi bridge script for a DreamHost API call
+     * requested by the webview, then posts the result back.
+     *
+     * Tries `python3` first, then falls back to `python` on systems where only
+     * the un-versioned binary is available (e.g. Windows).
+     */
+    private _handleApiRequest(webview: vscode.Webview, data: ApiRequestMessage) {
+        const scriptPath = path.join(this._extensionUri.fsPath, 'scripts', 'dreamhost_api.py');
+        this._spawnPythonBridge(['python3', 'python'], scriptPath, webview, data);
+    }
+
+    private _spawnPythonBridge(
+        executables: string[],
+        scriptPath: string,
+        webview: vscode.Webview,
+        data: ApiRequestMessage
+    ) {
+        const [exe, ...rest] = executables;
+        const python = spawn(exe, [scriptPath], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+        const payload = JSON.stringify({ key: data.apiKey, cmd: data.cmd, params: data.params ?? {} });
+        python.stdin.write(payload);
+        python.stdin.end();
+
+        let stdout = '';
+        python.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+        python.stderr.on('data', (chunk: Buffer) => { console.error(`[dreamhost_api.py]: ${chunk.toString()}`); });
+
+        python.on('close', () => {
+            let response: { result: string; data: unknown };
+            try {
+                response = JSON.parse(stdout) as { result: string; data: unknown };
+            } catch {
+                response = { result: 'error', data: 'Failed to parse response from Python bridge.' };
+            }
+            webview.postMessage({ type: 'apiResponse', id: data.id, result: response.result, data: response.data });
+        });
+
+        python.on('error', (err: NodeJS.ErrnoException) => {
+            if (err.code === 'ENOENT' && rest.length > 0) {
+                // Binary not found — try the next candidate
+                this._spawnPythonBridge(rest, scriptPath, webview, data);
+                return;
+            }
+            webview.postMessage({
+                type: 'apiResponse',
+                id: data.id,
+                result: 'error',
+                data: `Could not start Python bridge (tried: ${[exe, ...rest].join(', ')}): ${err.message}. ` +
+                      `Ensure Python 3 is installed and run 'npm run setup:python'.`
+            });
         });
     }
 
@@ -56,7 +124,7 @@ class DreamDeployWebviewProvider implements vscode.WebviewViewProvider {
             <html lang="en">
             <head>
                 <meta charset="UTF-8">
-                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' https://api.dreamhost.com; connect-src https://api.dreamhost.com;">
+                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <link href="${styleUri}" rel="stylesheet">
                 <title>DreamDeploy</title>
