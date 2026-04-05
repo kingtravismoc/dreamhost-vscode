@@ -104,6 +104,11 @@ class SftpManager {
         }
     }
 
+    async delete(remotePath: string): Promise<void> {
+        this._assertConnected();
+        await this._client.delete(remotePath);
+    }
+
     private _assertConnected(): void {
         if (!this._connected) { throw new Error('SFTP not connected. Use the Files tab to connect first.'); }
     }
@@ -311,8 +316,7 @@ export function activate(context: vscode.ExtensionContext) {
         );
         if (confirm !== 'Delete') { return; }
         try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (sftp as any)._client.delete(item.remotePath);
+            await sftp.delete(item.remotePath);
             explorerProvider.refresh();
         } catch (err) {
             vscode.window.showErrorMessage(`Delete failed: ${(err as Error).message}`);

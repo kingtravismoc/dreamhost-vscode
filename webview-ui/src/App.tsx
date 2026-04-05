@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   UploadCloud, CheckCircle, Loader2, Plus, Terminal,
   Globe, FolderOpen, Activity, ChevronRight, ChevronDown,
@@ -93,6 +93,9 @@ type Tab = 'deploy' | 'domains' | 'files' | 'status';
 const pendingRequests = new Map<string, (response: ApiResponse) => void>();
 
 // ── App ────────────────────────────────────────────────────────────────────────
+
+let _logIdCounter = 0;
+const nextLogId = () => ++_logIdCounter;
 
 const App = () => {
   // Global state
@@ -189,15 +192,20 @@ const App = () => {
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [addLog, requestSftpList]);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
-  const addLog = (msg: string, type = 'info') => {
-    setLogs(prev => [...prev, { id: Date.now() + Math.random(), msg, type }]);
+  const addLog = useCallback((msg: string, type = 'info') => {
+    setLogs(prev => [...prev, { id: nextLogId(), msg, type }]);
     if (vscode) { vscode.postMessage({ type: 'log', value: msg }); }
-  };
+  }, []);
+
+  const requestSftpList = useCallback((remotePath: string) => {
+    if (!vscode) { return; }
+    setSftpLoading(true);
+    vscode.postMessage({ type: 'sftpList', remotePath });
+  }, []);
 
   const dreamHostRequest = (cmd: string, params: Record<string, string> = {}): Promise<ApiResponse> => {
     return new Promise((resolve, reject) => {
@@ -210,14 +218,6 @@ const App = () => {
       vscode.postMessage({ type: 'apiRequest', id, apiKey, cmd, params });
     });
   };
-
-  const requestSftpList = (remotePath: string) => {
-    if (!vscode) { return; }
-    setSftpLoading(true);
-    vscode.postMessage({ type: 'sftpList', remotePath });
-  };
-
-  // ── Deploy tab handlers ────────────────────────────────────────────────────
 
   const startInfrastructure = async () => {
     setDeployLoading(true);
