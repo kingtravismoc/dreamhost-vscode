@@ -139,6 +139,11 @@
           "default": false,
           "description": "Automatically push the file to the remote server when saved"
         },
+        "dreamdeploy.password": {
+          "type": "string",
+          "default": "",
+          "description": "SFTP/SSH password (leave blank to be prompted at connect time)"
+        },
         "dreamdeploy.ignorePatterns": {
           "type": "array",
           "items": { "type": "string" },
