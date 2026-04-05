@@ -1,45 +1,180 @@
 {
-  "name": "dreamhost-vscode",
+  "name": "dreamdeploy",
   "displayName": "DreamDeploy",
-  "description": "Deploy to DreamHost from VS Code",
-  "version": "0.0.1",
+  "description": "DreamHost file management for VS Code and GitHub Codespaces: SFTP push/pull, remote file explorer, and DreamHost API integration.",
+  "version": "0.1.0",
+  "publisher": "kingtravismoc",
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other"],
+  "categories": [
+    "Other"
+  ],
   "activationEvents": [],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
+  "icon": "media/icon.png",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "dreamdeploy-sidebar",
+          "id": "dreamdeploy",
           "title": "DreamDeploy",
-          "icon": "$(cloud-upload)"
+          "icon": "media/dreamhost.svg"
         }
       ]
     },
     "views": {
-      "dreamdeploy-sidebar": [
+      "dreamdeploy": [
         {
           "type": "webview",
           "id": "dreamdeploy.sidebarView",
-          "name": "DreamDeploy"
+          "name": "Control Panel"
+        },
+        {
+          "id": "dreamdeploy.remoteExplorer",
+          "name": "Remote Files"
         }
       ]
+    },
+    "commands": [
+      {
+        "command": "dreamdeploy.connect",
+        "title": "DreamDeploy: Connect to Remote",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "dreamdeploy.disconnect",
+        "title": "DreamDeploy: Disconnect",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "dreamdeploy.pushFile",
+        "title": "DreamDeploy: Push Current File",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "dreamdeploy.pushWorkspace",
+        "title": "DreamDeploy: Push Workspace to Remote",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "dreamdeploy.pullFile",
+        "title": "DreamDeploy: Pull File from Remote",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "dreamdeploy.refreshRemote",
+        "title": "DreamDeploy: Refresh Remote Explorer",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "dreamdeploy.deleteRemoteFile",
+        "title": "DreamDeploy: Delete Remote File",
+        "icon": "$(trash)"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "dreamdeploy.pushFile",
+          "group": "dreamdeploy@1",
+          "when": "editorHasDocument"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "dreamdeploy.refreshRemote",
+          "when": "view == dreamdeploy.remoteExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "dreamdeploy.connect",
+          "when": "view == dreamdeploy.remoteExplorer && !dreamdeploy.connected",
+          "group": "navigation"
+        },
+        {
+          "command": "dreamdeploy.disconnect",
+          "when": "view == dreamdeploy.remoteExplorer && dreamdeploy.connected",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "dreamdeploy.pullFile",
+          "when": "view == dreamdeploy.remoteExplorer && viewItem == remoteFile",
+          "group": "inline"
+        },
+        {
+          "command": "dreamdeploy.deleteRemoteFile",
+          "when": "view == dreamdeploy.remoteExplorer && viewItem == remoteFile",
+          "group": "dreamdeploy@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "DreamDeploy",
+      "properties": {
+        "dreamdeploy.host": {
+          "type": "string",
+          "default": "",
+          "description": "SFTP/SSH host (e.g. your DreamHost server hostname)"
+        },
+        "dreamdeploy.port": {
+          "type": "number",
+          "default": 22,
+          "description": "SSH port"
+        },
+        "dreamdeploy.username": {
+          "type": "string",
+          "default": "",
+          "description": "SSH/SFTP username"
+        },
+        "dreamdeploy.remotePath": {
+          "type": "string",
+          "default": "/",
+          "description": "Remote base path on the server"
+        },
+        "dreamdeploy.uploadOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically push the file to the remote server when saved"
+        },
+        "dreamdeploy.ignorePatterns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [".git", "node_modules", ".DS_Store"],
+          "description": "File/folder patterns to exclude from uploads"
+        }
+      }
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run build",
-    "compile": "tsc -p ./",
-    "build": "npm run compile && npm run build:webview",
-    "build:webview": "cd webview-ui && npm run build",
-    "watch": "tsc -watch -p ./",
-    "setup:python": "pip3 install -r scripts/requirements.txt"
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "compile-tests": "tsc -p . --outDir out",
+    "lint": "eslint src --ext ts,tsx"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
     "@types/vscode": "^1.85.0",
-    "@types/node": "^20",
-    "typescript": "^5"
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "css-loader": "^7.1.2",
+    "eslint": "^8.57.0",
+    "style-loader": "^4.0.0",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.4.0",
+    "webpack": "^5.90.0",
+    "webpack-cli": "^5.1.4"
+  },
+  "dependencies": {
+    "lucide-react": "^0.511.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "ssh2-sftp-client": "^12.1.1"
   }
 }
